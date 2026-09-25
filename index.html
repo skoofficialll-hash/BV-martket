@@ -1076,7 +1076,7 @@ function vsRefresh(st){
    BV_SERVER khaali = offline mode (pehle jaisa). Server URL daalne par
    app server se shared data pull/push karta hai — sab users ek hi marketplace
    dekhte hain. Personal data (cart, wishlist, addresses) device par hi rehta hai. */
-const BV_SERVER = '';   // e.g. 'https://bv-marketplace.onrender.com'
+const BV_SERVER = 'https://bv-martket.onrender.com/';   // e.g. 'https://bv-marketplace.onrender.com'
 const SHARED_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
 let SYNC_TIMER = null;
 function sharedState(){ const o={}; SHARED_KEYS.forEach(k=>{ o[k]=localStorage.getItem(k); }); return o; }
