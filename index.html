@@ -1076,7 +1076,8 @@ function vsRefresh(st){
    BV_SERVER khaali = offline mode (pehle jaisa). Server URL daalne par
    app server se shared data pull/push karta hai — sab users ek hi marketplace
    dekhte hain. Personal data (cart, wishlist, addresses) device par hi rehta hai. */
-const BV_SERVER = 'https://bv-martket.onrender.com/';   // e.g. 'https://bv-marketplace.onrender.com'
+const BV_SERVER = 'https://bv-martket.onrender.com';   // e.g. 'https://bv-marketplace.onrender.com'
+const BV_API = ('' + BV_SERVER).replace(/\/+$/, '');   // trailing slash safe
 const SHARED_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
 let SYNC_TIMER = null;
 function sharedState(){ const o={}; SHARED_KEYS.forEach(k=>{ o[k]=localStorage.getItem(k); }); return o; }
@@ -1092,14 +1093,14 @@ function setSyncDot(){
 }
 function pushState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
-  fetch(BV_SERVER + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())})
+  fetch(BV_API + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())})
     .then(r=>{ if(!r.ok) throw 0; SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot(); if(manual) toast('☁️ Data pushed to server ✓'); })
     .catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); });
 }
 function pullState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
   if(!manual && sessionStorage.getItem('bv_pulled')){ schedulePush(); return; }
-  fetch(BV_SERVER + '/api/state').then(r=>r.json()).then(s=>{
+  fetch(BV_API + '/api/state').then(r=>r.json()).then(s=>{
     sessionStorage.setItem('bv_pulled','1');
     SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot();
     const before = JSON.stringify(sharedState());
