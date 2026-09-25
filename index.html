@@ -439,6 +439,7 @@
       <div class="logo-mark">BV</div>
       <div class="logo-text">BV<small>Marketplace</small></div>
     </div>
+    <span id="syncDot" style="display:none;width:9px;height:9px;border-radius:50%;background:#888;margin-right:10px;flex-shrink:0;box-shadow:0 0 6px rgba(111,209,139,.6)" title="Server sync"></span>
     <button class="icon-btn" id="notifBtn" title="Notifications" onclick="openNotifications()">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
       <span class="badge" id="notifCount" style="display:none">0</span>
@@ -1075,25 +1076,37 @@ function vsRefresh(st){
    BV_SERVER khaali = offline mode (pehle jaisa). Server URL daalne par
    app server se shared data pull/push karta hai — sab users ek hi marketplace
    dekhte hain. Personal data (cart, wishlist, addresses) device par hi rehta hai. */
-const BV_SERVER = 'https://bv-martket.onrender.com/';   // e.g. 'https://bv-marketplace.onrender.com'
+const BV_SERVER = '';   // e.g. 'https://bv-marketplace.onrender.com'
 const SHARED_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
 let SYNC_TIMER = null;
 function sharedState(){ const o={}; SHARED_KEYS.forEach(k=>{ o[k]=localStorage.getItem(k); }); return o; }
 function applySharedState(s){ Object.entries(s||{}).forEach(([k,v])=>{ if(SHARED_KEYS.includes(k) && v!=null) localStorage.setItem(k, v); }); }
-function pushState(){
-  if(!BV_SERVER) return;
-  fetch(BV_SERVER + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())}).catch(()=>{});
+let SYNC_OK = null;      // null = offline mode, true = connected, false = error
+let lastSyncTs = 0;
+function setSyncDot(){
+  const d = document.getElementById('syncDot'); if(!d) return;
+  d.style.display = BV_SERVER ? 'block' : 'none';
+  d.style.background = SYNC_OK===true ? '#6fd18b' : (SYNC_OK===false ? '#e05252' : '#888');
+  d.style.boxShadow = SYNC_OK===true ? '0 0 6px rgba(111,209,139,.7)' : (SYNC_OK===false ? '0 0 6px rgba(224,82,82,.7)' : 'none');
+  d.title = BV_SERVER ? ('Server sync — ' + (SYNC_OK===true ? 'connected ✓' : SYNC_OK===false ? 'not reachable ✕' : 'connecting…')) : '';
 }
-function pullState(){
-  if(!BV_SERVER) return;
-  if(sessionStorage.getItem('bv_pulled')){ schedulePush(); return; }
+function pushState(manual){
+  if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
+  fetch(BV_SERVER + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())})
+    .then(r=>{ if(!r.ok) throw 0; SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot(); if(manual) toast('☁️ Data pushed to server ✓'); })
+    .catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); });
+}
+function pullState(manual){
+  if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
+  if(!manual && sessionStorage.getItem('bv_pulled')){ schedulePush(); return; }
   fetch(BV_SERVER + '/api/state').then(r=>r.json()).then(s=>{
     sessionStorage.setItem('bv_pulled','1');
+    SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot();
     const before = JSON.stringify(sharedState());
     applySharedState(s);
     if(JSON.stringify(sharedState()) !== before) location.reload();
-    else schedulePush();
-  }).catch(()=>{});
+    else { if(manual) toast('☁️ Already up to date'); schedulePush(); }
+  }).catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); });
 }
 function schedulePush(){ if(!BV_SERVER) return; clearTimeout(SYNC_TIMER); SYNC_TIMER = setTimeout(pushState, 2500); }
 
@@ -1227,6 +1240,11 @@ function renderProfile(){
           <button type="button" class="seg-btn ${THEME==='light'?'on':''}" onclick="setTheme('light')" style="text-align:center">☀️</button>
         </div>
       </div>
+      ${BV_SERVER?`<div class="prof-item" style="cursor:default"><div class="pic">☁️</div><div class="pl">Server Sync<small>${SYNC_OK===true?'connected — sab users same marketplace':(SYNC_OK===false?'⚠ server not reachable':'connecting…')}</small></div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button type="button" class="btn btn-outline" style="padding:7px 10px;font-size:11px" onclick="pullState(true)">⬇ Pull</button>
+          <button type="button" class="btn btn-gold" style="padding:7px 10px;font-size:11px" onclick="pushState(true)">⬆ Push</button>
+        </div></div>`:''}
       <div class="prof-item" style="cursor:default;flex-wrap:wrap"><div class="pic">🌐</div><div class="pl">Language<small>${T('langNoteSmall')}</small></div>
         <div style="display:grid;grid-template-columns:repeat(2,minmax(86px,1fr));gap:7px;flex-shrink:0;width:100%;max-width:220px;margin-left:44px">
           <button type="button" class="seg-btn ${LANG==='en'?'on':''}" onclick="setLang('en')" style="text-align:center;padding:8px 4px">English</button>
@@ -2082,6 +2100,7 @@ function updateNotifBadge(){ const b=document.getElementById('notifCount'); if(!
 function openNotifications(){
   const l=myNotifs();
   l.forEach(n=>n.read=true); store.set('bv_notifs',notifs); updateNotifBadge();
+setSyncDot();
 pullState();
   openModal('🔔 Notifications', l.length ? l.map(n=>`
     <div class="list-row"><div class="li"><b style="font-weight:600;font-size:12.5px">${esc(n.text)}</b><span style="color:var(--ivory-faint);font-size:10px">${new Date(n.ts).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</span></div></div>`).join('')
