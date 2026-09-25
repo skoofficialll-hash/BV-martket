@@ -40,6 +40,9 @@
   .vs-top{grid-column:1/-1;text-align:center;font-size:11.5px;color:var(--gold-2);border:1px dashed rgba(217,185,120,.45);border-radius:10px;padding:9px;cursor:pointer;background:rgba(217,185,120,.06)}
   .vs-sent{grid-column:1/-1;height:12px}
   .vs-end{grid-column:1/-1;text-align:center;font-size:10.5px;color:var(--ivory-faint);padding:10px 0;letter-spacing:.5px}
+  .sync-overlay{position:fixed;inset:0;z-index:220;background:rgba(12,12,12,.9);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+  .sync-wheel{width:48px;height:48px;border-radius:50%;border:3px solid rgba(217,185,120,.25);border-top-color:var(--gold);animation:syncspin .8s linear infinite}
+  @keyframes syncspin{to{transform:rotate(360deg)}}
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   body{background:#101010;color:var(--ivory);font-family:var(--font-body);min-height:100vh;font-size:15px;line-height:1.55;padding-bottom:calc(var(--nav-h) + env(safe-area-inset-bottom))}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
@@ -1077,6 +1080,7 @@ function vsRefresh(st){
    app server se shared data pull/push karta hai — sab users ek hi marketplace
    dekhte hain. Personal data (cart, wishlist, addresses) device par hi rehta hai. */
 const BV_SERVER = 'https://bv-martket.onrender.com';   // e.g. 'https://bv-marketplace.onrender.com'
+const BV_API = ('' + BV_SERVER).replace(/\/+$/, '');   // trailing slash auto-remove (safe)
 const SHARED_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
 let SYNC_TIMER = null;
 function sharedState(){ const o={}; SHARED_KEYS.forEach(k=>{ o[k]=localStorage.getItem(k); }); return o; }
@@ -1092,23 +1096,41 @@ function setSyncDot(){
   else { d.style.background = 'rgba(255,255,255,.35)'; d.style.boxShadow = 'none'; }
   d.title = 'Server sync — ' + (SYNC_OK===true ? 'connected (green)' : SYNC_OK===false ? 'error (red)' : 'not connected (white)');
 }
+function showSyncWheel(on){
+  const o = document.getElementById('syncOverlay');
+  if(o) o.style.display = on ? 'flex' : 'none';
+}
 function pushState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
-  fetch(BV_SERVER + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())})
+  const ctl = new AbortController(); const to = setTimeout(()=>ctl.abort(), 25000);
+  fetch(BV_API + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState()), signal:ctl.signal})
     .then(r=>{ if(!r.ok) throw 0; SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot(); if(manual) toast('☁️ Data pushed to server ✓'); })
-    .catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); });
+    .catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); })
+    .finally(()=>clearTimeout(to));
 }
 function pullState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
-  if(!manual && sessionStorage.getItem('bv_pulled')){ schedulePush(); return; }
-  fetch(BV_SERVER + '/api/state').then(r=>r.json()).then(s=>{
-    sessionStorage.setItem('bv_pulled','1');
-    SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot();
-    const before = JSON.stringify(sharedState());
-    applySharedState(s);
-    if(JSON.stringify(sharedState()) !== before) location.reload();
-    else { if(manual) toast('☁️ Already up to date'); schedulePush(); }
-  }).catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); });
+  /* FULL AUTO: har load par pull + 45 sec baar-baar background sync.
+     Render free server soya ho to 6 retry (12 sec gap) khud karta hai. */
+  let tries = 0;
+  function attempt(){
+    const ctl = new AbortController(); const to = setTimeout(()=>ctl.abort(), 30000);
+    fetch(BV_API + '/api/state', {signal:ctl.signal}).then(r=>r.json()).then(s=>{
+      clearTimeout(to);
+      SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot();
+      if(!window.FIRST_SYNC_DONE){ window.FIRST_SYNC_DONE=true; showSyncWheel(false); }
+      const before = JSON.stringify(sharedState());
+      applySharedState(s);
+      if(JSON.stringify(sharedState()) !== before) location.reload();
+      else { if(manual) toast('☁️ Already up to date'); schedulePush(); }
+    }).catch(()=>{
+      clearTimeout(to);
+      tries++;
+      if(tries < 6){ SYNC_OK=null; setSyncDot(); setTimeout(attempt, 12000); }
+      else { SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); if(!window.FIRST_SYNC_DONE){ window.FIRST_SYNC_DONE=true; showSyncWheel(false); } }
+    });
+  }
+  attempt();
 }
 function schedulePush(){ if(!BV_SERVER) return; clearTimeout(SYNC_TIMER); SYNC_TIMER = setTimeout(pushState, 2500); }
 
@@ -1235,7 +1257,7 @@ function renderProfile(){
     </div>
 
     <div class="prof-sec">
-      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v26.5</small></h4>
+      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v27</small></h4>
       <div class="prof-item" style="cursor:default"><div class="pic">🎨</div><div class="pl">Theme<small>${T('themeNote')}</small></div>
         <div class="seg" style="width:140px;flex-shrink:0">
           <button type="button" class="seg-btn ${THEME==='dark'?'on':''}" onclick="setTheme('dark')" style="text-align:center">🌙</button>
@@ -2102,9 +2124,6 @@ function updateNotifBadge(){ const b=document.getElementById('notifCount'); if(!
 function openNotifications(){
   const l=myNotifs();
   l.forEach(n=>n.read=true); store.set('bv_notifs',notifs); updateNotifBadge();
-setSyncDot();
-if(BV_SERVER) setTimeout(()=>toast('☁️ Server sync ON — ' + BV_API), 1000);
-pullState();
   openModal('🔔 Notifications', l.length ? l.map(n=>`
     <div class="list-row"><div class="li"><b style="font-weight:600;font-size:12.5px">${esc(n.text)}</b><span style="color:var(--ivory-faint);font-size:10px">${new Date(n.ts).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</span></div></div>`).join('')
     : '<div style="text-align:center;padding:30px;color:var(--ivory-faint)">No notifications yet.</div>');
@@ -3533,6 +3552,13 @@ updateNavForSeller();
 if(THEME==='light') document.body.classList.add('light');
 applyStaticLang();
 updateNotifBadge();
+setSyncDot();
+if(BV_SERVER){
+  showSyncWheel(true);
+  setTimeout(()=>showSyncWheel(false), 90000);
+  pullState();
+  setInterval(()=>{ if(document.visibilityState==='visible') pullState(); }, 45000);
+}
 (function(){
   const back = stockAlerts.filter(pid=>{const p=products.find(x=>x.id===pid);return p&&p.type!=='digital'&&p.stock>0;}).length;
   if(back) setTimeout(()=>toast('🔔 '+back+' watched product'+(back>1?'s':'')+T('t_backStock')), 4000);
@@ -3547,5 +3573,10 @@ updateNotifBadge();
   }, 2600);
 })();
 </script>
+<div class="sync-overlay" id="syncOverlay" style="display:none">
+  <div class="sync-wheel"></div>
+  <div style="color:var(--ivory-dim);font-size:13.5px;letter-spacing:.4px">☁️ Syncing with BV server…</div>
+  <div style="color:var(--ivory-faint);font-size:11px">First sync can take up to a minute if the server was sleeping</div>
+</div>
 </body>
 </html>
