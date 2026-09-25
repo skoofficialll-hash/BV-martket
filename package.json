@@ -1,0 +1,15 @@
+{
+  "name": "bv-marketplace-server",
+  "version": "1.0.0",
+  "description": "BV Marketplace — shared state server (demo)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,49 @@
+/* ============================================================
+   BV MARKETPLACE — SERVER (v1)
+   Chhota Express server jo tumhari marketplace ko asli banata hai:
+   sab users ka data ek jagah (server) pe rahega — koi bhi user
+   product banaega to doosre users ko dikhega.
+
+   Chalane ke liye (apne computer pe test):
+     1. is folder mein:  npm install
+     2. phir:            node server.js
+     3. browser mein kholo: http://localhost:3000
+
+   FREE DEPLOY (Render.com) — detail ke liye BV_Server_Deploy_Guide.txt padho.
+   ============================================================ */
+
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+app.use(express.json({ limit: '60mb' }));           // audio/images bhi sync ho sake
+app.use(express.static(__dirname));                  // index.html + saari files serve karo
+
+const DATA_FILE = path.join(__dirname, 'data.json'); // yahi "database" hai (demo)
+
+function readState() {
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
+  catch (e) { return {}; }
+}
+
+// Poore marketplace ka shared data — app isse pull karta hai
+app.get('/api/state', (req, res) => {
+  res.json(readState());
+});
+
+// App se aaya naya data save karo (last-write-wins — demo level)
+app.post('/api/state', (req, res) => {
+  const body = req.body || {};
+  // basic validation — sirf allowed keys hi save karo
+  const ALLOWED = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
+  const clean = {};
+  ALLOWED.forEach(k => { if (body[k] !== undefined) clean[k] = body[k]; });
+  clean._ts = Date.now();
+  fs.writeFile(DATA_FILE, JSON.stringify(clean), () => res.json({ ok: true, saved: Object.keys(clean).length }));
+});
+
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('BV server chal raha hai — port ' + PORT));
