@@ -439,7 +439,7 @@
       <div class="logo-mark">BV</div>
       <div class="logo-text">BV<small>Marketplace</small></div>
     </div>
-    <span id="syncDot" style="display:none;width:9px;height:9px;border-radius:50%;background:#888;margin-right:10px;flex-shrink:0;box-shadow:0 0 6px rgba(111,209,139,.6)" title="Server sync"></span>
+    <span id="syncDot" style="display:none;padding:4px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#3a3a3a;color:#fff;margin-right:6px;flex-shrink:0" title="Server sync">☁️ …</span>
     <button class="icon-btn" id="notifBtn" title="Notifications" onclick="openNotifications()">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
       <span class="badge" id="notifCount" style="display:none">0</span>
@@ -1077,7 +1077,6 @@ function vsRefresh(st){
    app server se shared data pull/push karta hai — sab users ek hi marketplace
    dekhte hain. Personal data (cart, wishlist, addresses) device par hi rehta hai. */
 const BV_SERVER = 'https://bv-martket.onrender.com';   // e.g. 'https://bv-marketplace.onrender.com'
-const BV_API = ('' + BV_SERVER).replace(/\/+$/, '');   // trailing slash safe
 const SHARED_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
 let SYNC_TIMER = null;
 function sharedState(){ const o={}; SHARED_KEYS.forEach(k=>{ o[k]=localStorage.getItem(k); }); return o; }
@@ -1087,20 +1086,21 @@ let lastSyncTs = 0;
 function setSyncDot(){
   const d = document.getElementById('syncDot'); if(!d) return;
   d.style.display = BV_SERVER ? 'block' : 'none';
-  d.style.background = SYNC_OK===true ? '#6fd18b' : (SYNC_OK===false ? '#e05252' : '#888');
-  d.style.boxShadow = SYNC_OK===true ? '0 0 6px rgba(111,209,139,.7)' : (SYNC_OK===false ? '0 0 6px rgba(224,82,82,.7)' : 'none');
+  if(SYNC_OK===true){ d.textContent = '☁️ ON'; d.style.background = '#2e7d4f'; d.style.color = '#fff'; }
+  else if(SYNC_OK===false){ d.textContent = '☁️ ERR'; d.style.background = '#8f2f2f'; d.style.color = '#fff'; }
+  else { d.textContent = '☁️ …'; d.style.background = '#3a3a3a'; d.style.color = '#fff'; }
   d.title = BV_SERVER ? ('Server sync — ' + (SYNC_OK===true ? 'connected ✓' : SYNC_OK===false ? 'not reachable ✕' : 'connecting…')) : '';
 }
 function pushState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
-  fetch(BV_API + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())})
+  fetch(BV_SERVER + '/api/state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sharedState())})
     .then(r=>{ if(!r.ok) throw 0; SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot(); if(manual) toast('☁️ Data pushed to server ✓'); })
     .catch(()=>{ SYNC_OK=false; setSyncDot(); if(manual) toast('⚠ Server not reachable'); });
 }
 function pullState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
   if(!manual && sessionStorage.getItem('bv_pulled')){ schedulePush(); return; }
-  fetch(BV_API + '/api/state').then(r=>r.json()).then(s=>{
+  fetch(BV_SERVER + '/api/state').then(r=>r.json()).then(s=>{
     sessionStorage.setItem('bv_pulled','1');
     SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot();
     const before = JSON.stringify(sharedState());
@@ -1234,7 +1234,7 @@ function renderProfile(){
     </div>
 
     <div class="prof-sec">
-      <h4>⚙️ ${T('appSettings')}</h4>
+      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v26.2</small></h4>
       <div class="prof-item" style="cursor:default"><div class="pic">🎨</div><div class="pl">Theme<small>${T('themeNote')}</small></div>
         <div class="seg" style="width:140px;flex-shrink:0">
           <button type="button" class="seg-btn ${THEME==='dark'?'on':''}" onclick="setTheme('dark')" style="text-align:center">🌙</button>
@@ -2102,6 +2102,7 @@ function openNotifications(){
   const l=myNotifs();
   l.forEach(n=>n.read=true); store.set('bv_notifs',notifs); updateNotifBadge();
 setSyncDot();
+if(BV_SERVER) setTimeout(()=>toast('☁️ Server sync ON — ' + BV_API), 1000);
 pullState();
   openModal('🔔 Notifications', l.length ? l.map(n=>`
     <div class="list-row"><div class="li"><b style="font-weight:600;font-size:12.5px">${esc(n.text)}</b><span style="color:var(--ivory-faint);font-size:10px">${new Date(n.ts).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</span></div></div>`).join('')
