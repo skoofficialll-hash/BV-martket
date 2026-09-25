@@ -439,7 +439,7 @@
       <div class="logo-mark">BV</div>
       <div class="logo-text">BV<small>Marketplace</small></div>
     </div>
-    <span id="syncDot" style="display:none;padding:4px 9px;border-radius:99px;font-size:11px;font-weight:700;background:#3a3a3a;color:#fff;margin-right:6px;flex-shrink:0" title="Server sync">☁️ …</span>
+    <span id="syncDot" style="width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.35);margin-right:12px;flex-shrink:0;transition:background .4s,box-shadow .4s" title="Server sync"></span>
     <button class="icon-btn" id="notifBtn" title="Notifications" onclick="openNotifications()">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
       <span class="badge" id="notifCount" style="display:none">0</span>
@@ -1085,11 +1085,12 @@ let SYNC_OK = null;      // null = offline mode, true = connected, false = error
 let lastSyncTs = 0;
 function setSyncDot(){
   const d = document.getElementById('syncDot'); if(!d) return;
-  d.style.display = BV_SERVER ? 'block' : 'none';
-  if(SYNC_OK===true){ d.textContent = '☁️ ON'; d.style.background = '#2e7d4f'; d.style.color = '#fff'; }
-  else if(SYNC_OK===false){ d.textContent = '☁️ ERR'; d.style.background = '#8f2f2f'; d.style.color = '#fff'; }
-  else { d.textContent = '☁️ …'; d.style.background = '#3a3a3a'; d.style.color = '#fff'; }
-  d.title = BV_SERVER ? ('Server sync — ' + (SYNC_OK===true ? 'connected ✓' : SYNC_OK===false ? 'not reachable ✕' : 'connecting…')) : '';
+  /* dot kabhi invisible nahi hota — sirf colour badalta hai:
+     white = not connected | green = connected | red = error */
+  if(SYNC_OK===true){ d.style.background = '#6fd18b'; d.style.boxShadow = '0 0 8px rgba(111,209,139,.9)'; }
+  else if(SYNC_OK===false){ d.style.background = '#e05252'; d.style.boxShadow = '0 0 8px rgba(224,82,82,.9)'; }
+  else { d.style.background = 'rgba(255,255,255,.35)'; d.style.boxShadow = 'none'; }
+  d.title = 'Server sync — ' + (SYNC_OK===true ? 'connected (green)' : SYNC_OK===false ? 'error (red)' : 'not connected (white)');
 }
 function pushState(manual){
   if(!BV_SERVER){ if(manual) toast('Offline mode — server URL (BV_SERVER) set nahi hai'); return; }
@@ -1234,7 +1235,7 @@ function renderProfile(){
     </div>
 
     <div class="prof-sec">
-      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v26.2</small></h4>
+      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v26.5</small></h4>
       <div class="prof-item" style="cursor:default"><div class="pic">🎨</div><div class="pl">Theme<small>${T('themeNote')}</small></div>
         <div class="seg" style="width:140px;flex-shrink:0">
           <button type="button" class="seg-btn ${THEME==='dark'?'on':''}" onclick="setTheme('dark')" style="text-align:center">🌙</button>
