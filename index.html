@@ -743,6 +743,20 @@ const STR = {
 };
 function T(k){ const d = STR[LANG] || STR.en; return d[k] || (STR.en[k] !== undefined ? STR.en[k] : k); }
 function setLang(l){ store.set('bv_lang', l); location.reload(); }
+const LANG_NAMES = {en:'English', hi:'हिन्दी', es:'Español', zh:'中文'};
+const LANG_FLAGS = {en:'🇬🇧', hi:'🇮🇳', es:'🇪🇸', zh:'🇨🇳'};
+function currentLangName(){ return LANG_NAMES[LANG] || 'English'; }
+function openLangPicker(){
+  openModal('🌐 Language', `
+    <p style="color:var(--ivory-dim);font-size:12.5px;margin-bottom:12px">${T('langNoteSmall')}</p>
+    ${Object.keys(LANG_NAMES).map(code=>`
+    <div class="shop-row" style="${LANG===code?'border:1px solid rgba(217,185,120,.5);background:linear-gradient(135deg,rgba(217,185,120,.1),var(--black-3))':''}" onclick="setLang('${code}')">
+      <div class="shop-ava">${LANG_FLAGS[code]}</div>
+      <div class="si"><b>${LANG_NAMES[code]}</b><span>${LANG===code?'current language':'tap to switch'}</span></div>
+      ${LANG===code?'<span style="color:var(--gold);font-size:15px">✓</span>':'<span class="ar" style="color:var(--ivory-faint)">›</span>'}
+    </div>`).join('')}
+    <div class="form-note" style="margin-top:10px">Changing language reloads the app.</div>`);
+}
 function setTheme(t){
   THEME = t; store.set('bv_theme', t);
   document.body.classList.toggle('light', t==='light');
@@ -1082,6 +1096,7 @@ function vsRefresh(st){
 const BV_SERVER = 'https://bv-martket.onrender.com';   // e.g. 'https://bv-marketplace.onrender.com'
 const BV_API = ('' + BV_SERVER).replace(/\/+$/, '');   // trailing slash auto-remove (safe)
 const SHARED_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_stats','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];
+const RELOAD_KEYS = ['bv_products','bv_orders','bv_shops','bv_reviews','bv_coupons','bv_reports','bv_returns','bv_kyc','bv_audit','bv_adminverified','bv_official_msgs','bv_accounts'];   // bv_stats is NOT here — view counts change on every load
 let SYNC_TIMER = null;
 function sharedState(){ const o={}; SHARED_KEYS.forEach(k=>{ o[k]=localStorage.getItem(k); }); return o; }
 function applySharedState(s){ Object.entries(s||{}).forEach(([k,v])=>{ if(SHARED_KEYS.includes(k) && v!=null) localStorage.setItem(k, v); }); }
@@ -1119,10 +1134,20 @@ function pullState(manual){
       clearTimeout(to);
       SYNC_OK=true; lastSyncTs=Date.now(); setSyncDot();
       if(!window.FIRST_SYNC_DONE){ window.FIRST_SYNC_DONE=true; showSyncWheel(false); }
-      const before = JSON.stringify(sharedState());
+      /* FIX: bv_stats (view counts) har load pe badalta hai — reload loop hota tha.
+         Ab reload sirf meaningful keys (products, orders...) change hone par,
+         aur ek tab-session mein max ek baar. */
+      const before = sharedState();
       applySharedState(s);
-      if(JSON.stringify(sharedState()) !== before) location.reload();
-      else { if(manual) toast('☁️ Already up to date'); schedulePush(); }
+      const after = sharedState();
+      const changed = RELOAD_KEYS.some(k => before[k] !== after[k]);
+      if(changed && !sessionStorage.getItem('bv_reloaded')){
+        sessionStorage.setItem('bv_reloaded','1');
+        location.reload();
+      } else {
+        if(manual) toast(changed ? '☁️ Data updated' : '☁️ Already up to date');
+        schedulePush();
+      }
     }).catch(()=>{
       clearTimeout(to);
       tries++;
@@ -1133,6 +1158,14 @@ function pullState(manual){
   attempt();
 }
 function schedulePush(){ if(!BV_SERVER) return; clearTimeout(SYNC_TIMER); SYNC_TIMER = setTimeout(pushState, 2500); }
+/* bug fix: app band ya background karte waqt last changes push — data loss prevention */
+window.addEventListener('pagehide', function(){
+  if(!BV_SERVER) return;
+  try{ navigator.sendBeacon(BV_API + '/api/state', new Blob([JSON.stringify(sharedState())], {type:'text/plain;charset=UTF-8'})); }catch(e){}
+});
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState==='hidden' && BV_SERVER) pushState();
+});
 
 function cardHTML(p){
   const off = p.mrp && p.mrp > p.price ? Math.round((1-p.price/p.mrp)*100) : 0;
@@ -1257,26 +1290,15 @@ function renderProfile(){
     </div>
 
     <div class="prof-sec">
-      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v27</small></h4>
+      <h4>⚙️ ${T('appSettings')} <small style="color:var(--ivory-faint);font-size:9px;float:right;letter-spacing:1px">BV v30</small></h4>
       <div class="prof-item" style="cursor:default"><div class="pic">🎨</div><div class="pl">Theme<small>${T('themeNote')}</small></div>
         <div class="seg" style="width:140px;flex-shrink:0">
           <button type="button" class="seg-btn ${THEME==='dark'?'on':''}" onclick="setTheme('dark')" style="text-align:center">🌙</button>
           <button type="button" class="seg-btn ${THEME==='light'?'on':''}" onclick="setTheme('light')" style="text-align:center">☀️</button>
         </div>
       </div>
-      ${BV_SERVER?`<div class="prof-item" style="cursor:default"><div class="pic">☁️</div><div class="pl">Server Sync<small>${SYNC_OK===true?'connected — sab users same marketplace':(SYNC_OK===false?'⚠ server not reachable':'connecting…')}</small></div>
-        <div style="display:flex;gap:6px;flex-shrink:0">
-          <button type="button" class="btn btn-outline" style="padding:7px 10px;font-size:11px" onclick="pullState(true)">⬇ Pull</button>
-          <button type="button" class="btn btn-gold" style="padding:7px 10px;font-size:11px" onclick="pushState(true)">⬆ Push</button>
-        </div></div>`:''}
-      <div class="prof-item" style="cursor:default;flex-wrap:wrap"><div class="pic">🌐</div><div class="pl">Language<small>${T('langNoteSmall')}</small></div>
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(86px,1fr));gap:7px;flex-shrink:0;width:100%;max-width:220px;margin-left:44px">
-          <button type="button" class="seg-btn ${LANG==='en'?'on':''}" onclick="setLang('en')" style="text-align:center;padding:8px 4px">English</button>
-          <button type="button" class="seg-btn ${LANG==='hi'?'on':''}" onclick="setLang('hi')" style="text-align:center;padding:8px 4px">हिन्दी</button>
-          <button type="button" class="seg-btn ${LANG==='es'?'on':''}" onclick="setLang('es')" style="text-align:center;padding:8px 4px">Español</button>
-          <button type="button" class="seg-btn ${LANG==='zh'?'on':''}" onclick="setLang('zh')" style="text-align:center;padding:8px 4px">中文</button>
-        </div>
-      </div>
+      ${BV_SERVER?`<div class="prof-item" style="cursor:default"><div class="pic">☁️</div><div class="pl">Server Sync<small>${SYNC_OK===true?'connected — automatic background sync':(SYNC_OK===false?'⚠ server not reachable':'connecting…')}</small></div></div>`:''}
+      <div class="prof-item" onclick="openLangPicker()"><div class="pic">🌐</div><div class="pl">Language<small>${currentLangName()}${LANG==='en'?'':' · English'}</small></div><div class="ar">›</div></div>
     </div>
 
     <div class="prof-sec">
@@ -2582,6 +2604,7 @@ function switchAccount(){
 
 /* ================= CHECKOUT ================= */
 function openCheckout(buyNowPid){
+  window.APPLIED_COUPON = null;   // bug fix: stale coupon reset
   if(buyNowPid){
     const bp = products.find(x=>x.id===buyNowPid);
     if(bp && bp.type==='digital' && hasBought(buyNowPid)){ toast('🔒 You already own this digital item — no need to buy again'); return; }
@@ -2889,8 +2912,8 @@ function openCreateShop(){
     </div>`);
 }
 function createShop(){
-  const v = document.getElementById('csName').value.trim();
-  if(!v){ toast('Please enter a shop name'); return; }
+  const v = document.getElementById('csName').value.trim().replace(/['"<>\\]/g,'').replace(/\s+/g,' ');
+  if(!v){ toast('Please enter a shop name (quotes and < > are not allowed)'); return; }
   user.shop = { name: v, tagline:'', shopNo:'', loc:null, upi:'' };
   store.set('bv_user', user);
   const byEmail = store.get('bv_shops_by_email',{}); byEmail[user.email] = user.shop; store.set('bv_shops_by_email',byEmail);

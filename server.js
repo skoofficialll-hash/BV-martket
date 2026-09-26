@@ -1,19 +1,18 @@
 /* ============================================================
-   BV MARKETPLACE — SERVER v3
+   BV MARKETPLACE — SERVER v4 (SECURITY EDITION)
    ------------------------------------------------------------
-   Kya karta hai: sab users ka shared data ek jagah rakhta hai
-   (data.json) — koi bhi user product banata hai to sabko dikhta hai.
+   v4 mein naya:
+   - RATE LIMIT: ek IP sirf 80 requests / minute (spam/DoS bachav)
+   - BODY LIMIT: 10 MB (pehle 60 MB tha — abuse se bachav)
+   - sendBeacon support (app band karte waqt data save hota hai)
+   - Security headers + x-powered-by hidden
+   v3 se sab kuch included: /api/health, auto-backup,
+   atomic write, activity log, CORS, allowed-keys filter.
 
-   PEHLE SE BEHTAR (v3):
-   - /api/health  -> server zinda hai ya nahi, turant check
-   - Auto-backup  -> data kharab hone se bachav (data.backup.json)
-   - Atomic write -> likhte waqt file kabhi adhoori nahi hoti
-   - Activity log -> kaun kab data bheja (debugging ke liye)
-
-   ENDPOINTS (client waise hi kaam karta hai — kuch nahi badalna):
+   ENDPOINTS:
    GET  /api/state  -> poora marketplace data
-   POST /api/state  -> naya data save karo
-   GET  /api/health -> server status + kitne products hain
+   POST /api/state  -> naya data save (JSON ya text/plain beacon)
+   GET  /api/health -> server status
    ============================================================ */
 
 const express = require('express');
@@ -26,13 +25,19 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 const BACKUP_FILE = path.join(__dirname, 'data.backup.json');
 const LOG_FILE = path.join(__dirname, 'sync.log');
 
-// Sirf yehi keys save hoti hain — personal data (cart, wishlist,
-// addresses, notifications) server pe kabhi nahi jaata
 const ALLOWED_KEYS = [
   'bv_products', 'bv_orders', 'bv_shops', 'bv_reviews', 'bv_stats',
   'bv_coupons', 'bv_reports', 'bv_returns', 'bv_kyc', 'bv_audit',
   'bv_adminverified', 'bv_official_msgs', 'bv_accounts'
 ];
+
+/* ---------- SECURITY: basic headers ---------- */
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 /* ---------- CORS: koi bhi site (GitHub Pages etc.) se allow ---------- */
 app.use((req, res, next) => {
@@ -43,37 +48,50 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '60mb' }));
+/* ---------- SECURITY: RATE LIMIT (per-IP, 80 req/min) ----------
+   Render ke aage proxy hota hai, isliye x-forwarded-for use karte hain */
+const RATE = { max: 80, windowMs: 60000, hits: {} };
+setInterval(() => { RATE.hits = {}; }, RATE.windowMs);
+function rateLimit(req, res, next) {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+  RATE.hits[ip] = (RATE.hits[ip] || 0) + 1;
+  if (RATE.hits[ip] > RATE.max) {
+    return res.status(429).json({ ok: false, error: 'Too many requests — thodi der baad try karo' });
+  }
+  next();
+}
+app.use('/api/', rateLimit);
+
+/* ---------- BODY PARSER ----------
+   text/plain bhi accept karta hai — app band karte waqt
+   sendBeacon isi format mein bhejta hai */
+app.use(express.json({ limit: '10mb', type: ['application/json', 'text/plain'] }));
 app.use(express.static(__dirname));
 
 /* ---------- helpers ---------- */
 function readState() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
   catch (e) {
-    // data.json kharab ho to backup se wapas laao
     try {
       const b = JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf8'));
       fs.writeFileSync(DATA_FILE, JSON.stringify(b));
-      console.log('[BV] data.json kharab thi — backup se recover kiya');
+      console.log('[BV] data.json corrupt — backup se recover kiya');
       return b;
     } catch (e2) { return {}; }
   }
 }
 
-// Atomic write: pehle temp file, phir rename — kabhi adhoori file nahi
 function writeState(state) {
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(state));
-  // purani file ko backup banao
   try { if (fs.existsSync(DATA_FILE)) fs.copyFileSync(DATA_FILE, BACKUP_FILE); } catch (e) {}
   fs.renameSync(tmp, DATA_FILE);
 }
 
 function logLine(msg) {
   const t = new Date().toLocaleString('en-IN');
-  const line = '[' + t + '] ' + msg + '\n';
   console.log('[BV] ' + msg);
-  try { fs.appendFileSync(LOG_FILE, line); } catch (e) {}
+  try { fs.appendFileSync(LOG_FILE, '[' + t + '] ' + msg + '\n'); } catch (e) {}
 }
 
 function countProducts(state) {
@@ -83,47 +101,50 @@ function countProducts(state) {
   } catch (e) { return 0; }
 }
 
-/* ---------- HEALTH: server zinda hai? ---------- */
+/* ---------- HEALTH ---------- */
 app.get('/api/health', (req, res) => {
   const s = readState();
   res.json({
     ok: true,
-    server: 'BV Marketplace v3',
+    server: 'BV Marketplace v4',
     time: Date.now(),
     products: countProducts(s),
     keys: Object.keys(s).filter(k => ALLOWED_KEYS.includes(k)).length
   });
 });
 
-/* ---------- STATE: poora data padho ---------- */
+/* ---------- STATE READ ---------- */
 app.get('/api/state', (req, res) => {
   const s = readState();
   logLine('PULL — ' + countProducts(s) + ' products bheje');
   res.json(s);
 });
 
-/* ---------- STATE: naya data save karo (last-write-wins) ---------- */
+/* ---------- STATE WRITE (last-write-wins) ---------- */
 app.post('/api/state', (req, res) => {
   const body = req.body || {};
+  // agar text/plain beacon aaya ho aur body string bachi ho to parse karo
+  let data = body;
+  if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { data = {}; } }
+
   const clean = {};
-  ALLOWED_KEYS.forEach(k => { if (body[k] !== undefined) clean[k] = body[k]; });
+  ALLOWED_KEYS.forEach(k => { if (data[k] !== undefined) clean[k] = data[k]; });
   clean._ts = Date.now();
 
   const old = readState();
-  const dropped = Object.keys(body).filter(k => !ALLOWED_KEYS.includes(k));
+  const dropped = Object.keys(data).filter(k => !ALLOWED_KEYS.includes(k));
   writeState(clean);
 
-  logLine('PUSH — ' + countProducts(clean) + ' products save hue'
-    + (dropped.length ? ' (blocked keys: ' + dropped.join(',') + ')' : '')
-    + ' (pehle: ' + countProducts(old) + ' products)');
+  logLine('PUSH — ' + countProducts(clean) + ' products saved'
+    + (dropped.length ? ' (blocked: ' + dropped.join(',') + ')' : '')
+    + ' (before: ' + countProducts(old) + ')');
   res.json({ ok: true, saved: Object.keys(clean).length, products: countProducts(clean) });
 });
 
-/* ---------- home ---------- */
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => {
   const s = readState();
-  console.log('BV server v3 chal raha hai — port ' + PORT);
-  console.log('[BV] Data: ' + countProducts(s) + ' products, ' + Object.keys(s).length + ' keys');
+  console.log('BV server v4 (security edition) — port ' + PORT);
+  console.log('[BV] Data: ' + countProducts(s) + ' products');
 });
